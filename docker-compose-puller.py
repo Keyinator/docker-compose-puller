@@ -5,7 +5,7 @@ import requests
 import argparse
 import difflib
 
-def update_file(download_path, compose_file_path, backup_file_path, update_regex, show_diff=False):
+def update_file(download_path, compose_file_path, backup_file_path, update_regex, env_file_path, env_version_variable, show_diff=False):
     """
     Updates a file based on the given parameters.
 
@@ -15,8 +15,10 @@ def update_file(download_path, compose_file_path, backup_file_path, update_regex
         backup_file_path: Path to the backup directory.
         update_regex: Regular expression for version extraction.
         show_diff (bool, optional): Whether to show the difference between files. Defaults to False.
+        env_file_path (str, optional): Path to the environment file. Defaults to "./.env".
+        env_version_variable (str, optional): The variable name in the environment file to update. 
+                                               Defaults to "version".
     """
-
     # Download file (if URL)
     if download_path.startswith("http"):
         try:
@@ -31,7 +33,7 @@ def update_file(download_path, compose_file_path, backup_file_path, update_regex
             with open(temp_file, 'wb') as f:
                 f.write(response.content)
 
-            print("\nDownload complete.")
+            print("\nDownload complete.\n")
 
             # Read downloaded content from temporary file
             with open(temp_file, 'r') as f:
@@ -73,6 +75,7 @@ def update_file(download_path, compose_file_path, backup_file_path, update_regex
         if input("Update (will show diffs first)? (y/n): ").lower() != 'y':
             return
 
+        print("\n")
         for line in difflib.unified_diff( 
         compose_file_content.splitlines(), download_file_content.splitlines(), fromfile='Original',  
         tofile='Updated', lineterm=''): 
@@ -84,6 +87,7 @@ def update_file(download_path, compose_file_path, backup_file_path, update_regex
         if input("Update? (y/n): ").lower() != 'y':
             return
 
+    print("\n")
 
     # Backup compose file
     shutil.copy2(compose_file_path, backup_file_path)
@@ -91,6 +95,35 @@ def update_file(download_path, compose_file_path, backup_file_path, update_regex
     # Update compose file
     with open(compose_file_path, 'w') as f:
         f.write(download_file_content)
+
+    # Check if environment file path is set and adjust env_version_variable if needed
+    if env_file_path!="":
+        if(os.path.exists(env_file_path)):
+            with open(env_file_path, "r") as f:
+                env_content = f.read()
+
+                # Check if the "env_version_variable" line is present
+                if not any(line.startswith(f"{env_version_variable}=") for line in env_content.splitlines()):
+                    print(f"Error: Variable '{env_version_variable}' is not defined in '{env_file_path}'. Exiting.")
+                    return
+
+                # Check the value assigned to "env_version_variable"
+                for line in env_content.splitlines():
+                    if line.startswith(f"{env_version_variable}="):
+                        current_value = line.split("=", 1)[1]  
+                        if current_value != compose_version.group(1):
+                            print(f"Warning: Expected {compose_version.group(1)}, but found '{current_value}' in '{env_file_path}'. Still updating.")
+                        break  # Stop after finding the variable
+                
+                # Update the value in the environment file
+                with open(env_file_path, "w") as f:
+                    for line in env_content.splitlines():
+                        if line.startswith(f"{env_version_variable}="):
+                            f.write(f"{env_version_variable}={download_version.group(1)}\n")
+                        else:
+                            f.write(line + "\n") 
+        else:
+            print(f"Warning: Environment file '{env_file_path}' not found.")
 
     print("Update complete.")
 
@@ -102,6 +135,16 @@ if __name__ == '__main__':
     parser.add_argument('--backup_file_path', type=str, default='./docker-compose.yml.bck')
     parser.add_argument('--update_regex', type=str, default=r'image: [\w.\-/]*:([\w.\-/]*)')
     parser.add_argument('--show-diff', action="store_true", help="Show the difference between files after update", default=True)
+    parser.add_argument("--env_file_path", type=str, help="Path to the environment file", default="")
+    parser.add_argument("--env_version_variable", type=str, help="The variable name in the environment file to update", default="version")
     args = parser.parse_args()
 
-    update_file(args.download_path, args.compose_file_path, args.backup_file_path, args.update_regex, show_diff=args.show_diff)
+    update_file(
+        args.download_path,
+        args.compose_file_path,
+        args.backup_file_path,
+        args.update_regex,
+        args.env_file_path,
+        args.env_version_variable,
+        show_diff=args.show_diff,
+    )
